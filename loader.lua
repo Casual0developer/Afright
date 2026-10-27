@@ -1,46 +1,50 @@
--- Scan the executor folder containing this loader for <PlaceId>.lua.
-local SCRIPT_DIRECTORY = "."
+-- Game scripts are hosted in the root of this public GitHub repository.
+local REPOSITORY = "Casual0developer/Afright"
+local BRANCH = "main"
+local API_URL = "https://api.github.com/repos/" .. REPOSITORY .. "/contents?ref=" .. BRANCH
+local RAW_URL = "https://raw.githubusercontent.com/" .. REPOSITORY .. "/" .. BRANCH .. "/"
+
 local placeId = tostring(game.PlaceId)
 local matchingName = placeId .. ".lua"
 
-if type(listfiles) ~= "function" or type(readfile) ~= "function" or type(loadstring) ~= "function" then
-    warn("[Game Loader] This executor must support listfiles, readfile, and loadstring.")
+if type(loadstring) ~= "function" then
+    warn("[Game Loader] This executor must support loadstring.")
     return
 end
 
-local listOk, files = pcall(listfiles, SCRIPT_DIRECTORY)
-if not listOk or type(files) ~= "table" then
-    warn("[Game Loader] Could not scan " .. SCRIPT_DIRECTORY .. ": " .. tostring(files))
-    return
-end
-
-local matchingPath
-for _, path in ipairs(files) do
-    if type(path) == "string" then
-        local name = path:match("[^/\\]+$") or path
-        if name == matchingName then
-            matchingPath = path
+-- Enumerate repository root files so adding <PlaceId>.lua needs no loader edit.
+local foundMatch = false
+local listingAvailable = false
+local listingOk, listingOrError = pcall(function()
+    local HttpService = game:GetService("HttpService")
+    return HttpService:JSONDecode(game:HttpGet(API_URL))
+end)
+if listingOk and type(listingOrError) == "table" and listingOrError.message == nil then
+    listingAvailable = true
+    for _, entry in ipairs(listingOrError) do
+        if type(entry) == "table" and entry.type == "file" and entry.name == matchingName then
+            foundMatch = true
             break
         end
     end
 end
 
-if not matchingPath then
+if listingAvailable and not foundMatch then
     print("[Game Loader] No script found for PlaceId " .. placeId .. " (expected " .. matchingName .. ").")
     return
 end
 
-local readOk, source = pcall(readfile, matchingPath)
-if (not readOk or type(source) ~= "string") and matchingPath ~= matchingName then
-    -- Some executors list full paths but read files by name in the same folder.
-    readOk, source = pcall(readfile, matchingName)
-end
-if not readOk or type(source) ~= "string" then
-    warn("[Game Loader] Could not read " .. matchingName .. ": " .. tostring(source))
+-- The raw URL is an exact filename lookup and also works if GitHub's API
+-- listing is unavailable or rate limited.
+local fetchOk, sourceOrError = pcall(function()
+    return game:HttpGet(RAW_URL .. matchingName)
+end)
+if not fetchOk or type(sourceOrError) ~= "string" or sourceOrError == "" then
+    warn("[Game Loader] Could not download " .. matchingName .. ": " .. tostring(sourceOrError))
     return
 end
 
-local compileOk, script, compileError = pcall(loadstring, source)
+local compileOk, script, compileError = pcall(loadstring, sourceOrError)
 if not compileOk or type(script) ~= "function" then
     warn("[Game Loader] Could not compile " .. matchingName .. ": " .. tostring(compileError or script))
     return
