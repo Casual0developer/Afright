@@ -1,7 +1,7 @@
--- Supported game only. Print a clear message in the F9 developer console.
+
 local REQUIRED_PLACE_ID = 113273588963037
 if game.PlaceId ~= REQUIRED_PLACE_ID then
-    print(string.format("[Fluent Aura] Wrong game! Expected PlaceId %s; current PlaceId %s.", tostring(REQUIRED_PLACE_ID), tostring(game.PlaceId)))
+    print(string.format("[Afright Scripts] Wrong game! Expected PlaceId %s; current PlaceId %s.", tostring(REQUIRED_PLACE_ID), tostring(game.PlaceId)))
     return
 end
 
@@ -18,8 +18,8 @@ local swingRemote = remotes:FindFirstChild("Swing")
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 
 local Window = Fluent:CreateWindow({
-    Title = "Kill Aura",
-    SubTitle = "Fluent UI",
+    Title = "Afright Scripts",
+    SubTitle = "1.0.0",
     TabWidth = 150,
     Size = UDim2.fromOffset(520, 360),
     Acrylic = false,
@@ -29,11 +29,7 @@ local Window = Fluent:CreateWindow({
 
 local MainTab = Window:AddTab({ Title = "Combat", Icon = "swords" })
 local ESPTab = Window:AddTab({ Title = "ESP", Icon = "eye" })
-local AutoFightTab = Window:AddTab({ Title = "Auto Fight", Icon = "route" })
-local MiscTab = Window:AddTab({ Title = "Misc", Icon = "settings" })
 
--- Find real movement parts in R6/R15 and custom or nested avatar rigs.
--- Humanoid.RootPart is preferred because a visual Head or torso can be offset.
 local ROOT_NAMES = {
     "HumanoidRootPart", "RootPart", "Root", "CharacterRoot", "CollisionRoot",
 }
@@ -75,10 +71,6 @@ local function getCharacterRoot(character)
     return fallback
 end
 
---============================================================
--- COMBAT CONFIGURATION / TARGET FILTERS
--- World raycasts use unscaled studs. Attack remote uses /3.
---============================================================
 local lastAttack = -math.huge
 local attackCount = 0
 local cooldown = 0.625
@@ -92,10 +84,8 @@ local MAX_RAYCASTS_PER_ATTACK = 96
 local attackInProgress = false
 local attackErrorRetryAt = 0
 local friendCheckEnabled = true
-local friendCache = {} -- [UserId] = true, false, or "pending"/"unknown"
+local friendCache = {} 
 
--- Friendship checks may yield. Resolve them in separate tasks, never in Heartbeat.
--- Unknown friendship status is temporarily excluded so friends are not attacked.
 local function requestFriendStatus(otherPlayer)
     local userId = otherPlayer.UserId
     if friendCache[userId] ~= nil then
@@ -108,9 +98,9 @@ local function requestFriendStatus(otherPlayer)
             return player:IsFriendsWith(userId)
         end)
         if ok then
-            friendCache[userId] = isFriend -- Preserve false: false means not a friend.
+            friendCache[userId] = isFriend 
         else
-            friendCache[userId] = "unknown" -- Fail closed if Roblox lookup failed.
+            friendCache[userId] = "unknown" 
         end
     end)
 end
@@ -124,11 +114,6 @@ local function canTargetPlayer(otherPlayer)
     return friendCache[otherPlayer.UserId] == false
 end
 
---============================================================
--- SHARED HEALTH READER
--- Prefer replicated game-specific attributes / NumberValues.
--- Fallback to Humanoid.Health only when custom health is unavailable.
---============================================================
 local CURRENT_HEALTH_FIELDS = {
     "CurrentHealth", "CurrentHP", "Health", "HP", "HitPoints", "HealthValue",
 }
@@ -186,7 +171,7 @@ local function healthRoots(character, owner)
     local roots = {character}
     local humanoid = getRigHumanoid(character)
     if humanoid then
-        roots[#roots + 1] = humanoid -- Some games store custom HP as Humanoid attributes.
+        roots[#roots + 1] = humanoid 
     end
     for _, name in ipairs(HEALTH_DATA_CONTAINERS) do
         local child = character:FindFirstChild(name)
@@ -206,7 +191,7 @@ local function healthRoots(character, owner)
     return roots
 end
 
--- health, maxHealth, humanoid, sourceObject, sourceAttribute
+
 local function getHealthInfo(character, owner)
     if not character or not character:IsDescendantOf(Workspace) then
         return nil
@@ -235,7 +220,7 @@ local function getHealthInfo(character, owner)
     end
 
     local maximum
-    -- Match the custom health's container first, then inspect other containers.
+    
     if customHealth ~= nil then
         for _, root in ipairs(roots) do
             if root == healthSource or (healthSource and healthSource.Parent == root) then
@@ -271,9 +256,6 @@ Players.PlayerRemoving:Connect(function(otherPlayer)
     end
 end)
 
---============================================================
--- COMBAT AIM / VISIBILITY HELPERS
---============================================================
 local function getAttackOrigins(character)
     local root = getCharacterRoot(character)
     if not root or not root:IsA("BasePart") then
@@ -283,11 +265,11 @@ local function getAttackOrigins(character)
     local eye = root.Position + Vector3.new(0, 2.16, 0)
     local right = root.CFrame.RightVector
     return {
-        eye,                               -- Fastest and safest first
-        eye + right * 0.40,                -- Peek exposed left / right side
+        eye,                               
+        eye + right * 0.40,                
         eye - right * 0.40,
-        eye + Vector3.new(0, -0.45, 0),   -- Low gaps
-        eye + Vector3.new(0, 0.30, 0),    -- High gaps
+        eye + Vector3.new(0, -0.45, 0),   
+        eye + Vector3.new(0, 0.30, 0),    
     }
 end
 
@@ -321,12 +303,12 @@ local function findClearShot(localCharacter, targetCharacter, origins, budget, f
     rayParams.FilterType = Enum.RaycastFilterType.Exclude
     rayParams.FilterDescendantsInstances = {localCharacter, targetCharacter}
     rayParams.IgnoreWater = true
-    rayParams.RespectCanCollide = false -- Test queryable barriers, even if not collidable.
+    rayParams.RespectCanCollide = false 
 
     local originLimit = full and #origins or 1
     for i = 1, originLimit do
         local origin = origins[i]
-        -- Don't consider a peek origin if the segment from the normal eye is blocked.
+        
         if i > 1 then
             if budget.remaining <= 0 then
                 return nil
@@ -354,12 +336,6 @@ local function findClearShot(localCharacter, targetCharacter, origins, budget, f
     return nil
 end
 
---============================================================
--- COMBAT TARGET SELECTION / ATTACK LOOP
---============================================================
--- In a crowd, remain on the current lowest-health target for 2 seconds,
--- then move to the NEXT target in the current health ranking. Blocked
--- targets are skipped immediately rather than consuming cooldowns.
 local function orderedStartIndex(candidates, now)
     if targetPriority ~= "Lowest Health" or #candidates == 0 then
         return 1
@@ -439,15 +415,13 @@ local function attackPriorityTarget()
         if a.distance ~= b.distance then
             return a.distance < b.distance
         end
-        return a.userId < b.userId -- deterministic ties
+        return a.userId < b.userId 
     end)
 
     local startIndex = orderedStartIndex(candidates, now)
     local budget = {remaining = MAX_RAYCASTS_PER_ATTACK}
     local chosen, chosenEye, chosenDirection
 
-    -- First try quick center rays across all candidates, not 100+ rays
-    -- against a single blocked person while a large crowd is nearby.
     for pass = 1, 2 do
         for offset = 0, #candidates - 1 do
             local idx = ((startIndex + offset - 1) % #candidates) + 1
@@ -466,7 +440,7 @@ local function attackPriorityTarget()
         end
     end
     if not chosen then
-        return -- Cooldown stays ready; try again next Heartbeat.
+        return 
     end
 
     attackInProgress = true
@@ -488,7 +462,7 @@ local function attackPriorityTarget()
     attackInProgress = false
 
     if not ok then
-        attackErrorRetryAt = now + 1.5 -- Avoid repeated errors every rendered frame.
+        attackErrorRetryAt = now + 1.5 
         warn("[Fluent Aura] Attack remote failed: " .. tostring(errorMessage))
         return
     end
@@ -501,16 +475,13 @@ local function attackPriorityTarget()
                 rotatingTargetCharacter = chosen.character
                 rotatingTargetSince = now
             elseif now - rotatingTargetSince >= TARGET_ROTATION_SECONDS then
-                -- A one-person crowd must not reset its timer every hit.
+                
                 rotatingTargetSince = now
             end
         end
     end
 end
 
---============================================================
--- COMBAT UI
---============================================================
 local KillAuraToggle = MainTab:AddToggle("KillAuraToggle", {
     Title = "Kill Aura",
     Description = "Attack visible nearby players with multi-angle raycasting.",
@@ -528,7 +499,7 @@ KillAuraToggle:OnChanged(function(enabled)
         rotatingTargetCharacter = nil
         rotatingTargetSince = 0
         auraConnection = RunService.Heartbeat:Connect(attackPriorityTarget)
-        attackPriorityTarget() -- Run immediately, without waiting for the first Heartbeat.
+        attackPriorityTarget() 
     end
 end)
 
@@ -575,17 +546,13 @@ if friendCheckEnabled then
     end
 end
 
---============================================================
--- ESP CONFIGURATION / STATE
--- Visual effects remain client-side.
---============================================================
 local espEnabled = false
 local includeBots = false
 local showDistance = true
 local showHealth = true
 local showName = true
 local showBoxes = false
-local boxStyle = "2D" -- "2D" screen rectangle or "3D" model selection box.
+local boxStyle = "2D" 
 local playerESPColor = Color3.fromRGB(100, 226, 255)
 local botESPColor = Color3.fromRGB(255, 186, 83)
 
@@ -632,7 +599,7 @@ local function ensureESPOverlay()
     return gui
 end
 
--- A flat screen-space rectangle. Built once per target.
+
 local function make2DBox(isBot)
     local overlay = ensureESPOverlay()
     local color = getESPColor(isBot)
@@ -666,8 +633,6 @@ local function make2DBox(isBot)
     return box
 end
 
--- A genuine perspective-correct world-space wireframe around the model.
--- Unlike a 2D frame, the outline rotates as the character turns.
 local function make3DBox(character, isBot)
     local box = Instance.new("SelectionBox")
     box.Name = "ESP3DBox"
@@ -680,8 +645,6 @@ local function make3DBox(character, isBot)
     return box
 end
 
--- Convert a 3D model's bounding box corners into a 2D screen rectangle.
--- Return nil when the character is behind the camera or fully off-screen.
 local function getScreenBounds(character, camera, viewport)
     local boundsCFrame, size = character:GetBoundingBox()
     local half = size * 0.5
@@ -722,8 +685,6 @@ local function getScreenBounds(character, camera, viewport)
     return minX, minY, maxX, maxY
 end
 
--- The 3D SelectionBox follows the rig automatically, so no RenderStepped work.
--- RenderStepped is only needed for projected 2D outlines.
 local function updateESPGeometry()
     if not espEnabled or not showBoxes or boxStyle ~= "2D" then
         return
@@ -744,7 +705,7 @@ local function updateESPGeometry()
         if box and getLivingHumanoid(character) then
             local success, minX, minY, maxX, maxY = pcall(getScreenBounds, character, camera, viewport)
             if not success then
-                minX = nil -- Model changed / streamed out during bounding-box read.
+                minX = nil 
             end
             if minX then
                 box.Position = UDim2.fromOffset(minX, minY)
@@ -767,7 +728,7 @@ local function updateBoxVisibility()
             entry.box3D = make3DBox(character, entry.isBot)
         end
         if entry.box2D then
-            entry.box2D.Visible = false -- The next geometry tick decides visibility.
+            entry.box2D.Visible = false 
         end
         if entry.box3D then
             entry.box3D.Visible = use3D
@@ -842,8 +803,6 @@ local function createESP(character, displayName, isBot, part)
     label.TextYAlignment = Enum.TextYAlignment.Center
     label.Parent = gui
 
-    -- Give every NPC a persistent, separate BOT tag above its details.
-    -- Unlike the name field, this stays visible with Show Name disabled.
     local botTag = nil
     if isBot then
         gui.Size = UDim2.fromOffset(220, 108)
@@ -866,8 +825,6 @@ local function createESP(character, displayName, isBot, part)
         label.Size = UDim2.new(1, 0, 1, -26)
     end
 
-    -- Only construct the requested box style. Don't allocate hundreds of
-    -- unused UI instances when ESP boxes are disabled in a crowded server.
     local box2D = showBoxes and boxStyle == "2D" and make2DBox(isBot) or nil
     local box3D = showBoxes and boxStyle == "3D" and make3DBox(character, isBot) or nil
     if box3D then
@@ -911,7 +868,7 @@ local function createESP(character, displayName, isBot, part)
             end
         end)
     end
-    -- Listen to the currently detected custom-health source, too.
+    
     local _, _, _, healthSource, healthAttribute = getHealthInfo(character, owner)
     if healthSource then
         local signal
@@ -930,11 +887,8 @@ local function createESP(character, displayName, isBot, part)
     end
 end
 
---============================================================
--- ESP TARGET TRACKING / NPC DISCOVERY
---============================================================
 local function scanExistingBots()
-    -- Only called when bot ESP is first requested, not every frame.
+    
     for _, descendant in ipairs(Workspace:GetDescendants()) do
         if descendant:IsA("Humanoid") then
             local character = descendant.Parent
@@ -1026,9 +980,6 @@ local function refreshESPTargets()
     end
 end
 
---============================================================
--- ESP LABEL UPDATES / LIFECYCLE
---============================================================
 local function updateESPLabels()
     if not espEnabled then
         return
@@ -1041,7 +992,7 @@ local function updateESPLabels()
         local health, maximum = getHealthInfo(character, owner)
         local part = getESPPart(character)
         if not health or not part then
-            removeESP(character) -- No wait for the slower discovery sweep.
+            removeESP(character) 
         else
             local lines = {}
             if showName then
@@ -1061,8 +1012,6 @@ local function updateESPLabels()
     end
 end
 
--- Update every live ESP visual immediately when a picker changes.
--- New entries and newly created boxes also use the current colors.
 local function refreshESPColors()
     for _, entry in pairs(espEntries) do
         local color = getESPColor(entry.isBot)
@@ -1119,9 +1068,6 @@ local function stopESP()
     end
 end
 
---============================================================
--- ESP UI (ESP -> Boxes -> Box Style -> Bots -> Colors -> Labels)
---============================================================
 local ESPToggle = ESPTab:AddToggle("ESPToggle", {
     Title = "ESP",
     Description = "Highlight other players and show their details through walls.",
@@ -1272,21 +1218,14 @@ BoxStyleDropdown:OnChanged(function(value)
     end
 end)
 
---============================================================
--- AUTO FIGHT / CUSTOM STEERING
--- Custom lightweight, local waypoint search: no PathfindingService/MoveTo.
--- Input Keys is the default for custom player controllers. Timed recovery tries
--- jump, strafing, backtracking, then a freshly searched detour.
--- Character rigs without usable keyboard input may need game-specific controls.
---============================================================
 local function initializeAutoFight()
-    -- Isolate Auto Fight locals from the main Luau chunk.
-    -- Luau has a limit of 200 active registers in any one function.
+    
+    
     local autoFightEnabled = false
     local autoSprintEnabled = true
     local autoAvoidHoles = true
     local autoWaterEscape = true
-    local autoApproachDistance = 10 -- maximum preconfigured approach radius
+    local autoApproachDistance = 10 
     local autoFightSession = 0
     local autoFightTarget = nil
     local autoTargetCheckAt = 0
@@ -1314,9 +1253,9 @@ local function initializeAutoFight()
     local lastSprintAttemptAt = 0
     local knownHumanoid = nil
     local auraWasEnabledBeforeAutoFight = false
-    -- Auto selects direct steering, then simulates keyboard movement, then tries
-    -- client-owned assembly velocity if the first two methods did not move a custom rig.
-    local navigationMode = "Auto" -- keyboard first, fallback to physics if keys are ignored
+    
+    
+    local navigationMode = "Auto" 
     local movementDriver = "keyboard"
     local movementDriverSince = 0
     local movementLastPosition = nil
@@ -1329,7 +1268,7 @@ local function initializeAutoFight()
     local lastNavDiagnostic = 0
     local lastNoTargetDiagnostic = 0
     local lastBadRigDiagnostic = 0
-    local autoLookAtTarget = true -- immediate target facing, no smoothing
+    local autoLookAtTarget = true 
     local autoStuckRecovery = true
     local autoLookPart = nil
     local recoveryPhase = nil
@@ -1414,7 +1353,7 @@ local function initializeAutoFight()
         local f = flat.Magnitude > 0.01 and flat.Unit:Dot(forward) or 0
         local r = flat.Magnitude > 0.01 and flat.Unit:Dot(right) or 0
         local success = true
-        -- Release keys that are no longer needed before pressing new ones.
+        
         local wants = {W=f>0.35, S=f< -0.35, D=r>0.35, A=r< -0.35, Space=jump}
         for key, held in pairs(activeMoveKeys) do
             if held and not wants[key] then
@@ -1492,8 +1431,8 @@ local function initializeAutoFight()
     end
 
     local function acquireControls()
-        -- Retained only for backwards compatibility. Auto Fight intentionally
-        -- does not invoke this because custom controllers need PlayerModule.
+        
+        
         local playerScripts = player:FindFirstChild("PlayerScripts")
         local playerModule = playerScripts and playerScripts:FindFirstChild("PlayerModule")
         if not playerModule then return end
@@ -1577,9 +1516,6 @@ local function initializeAutoFight()
         local controller = character:FindFirstChildWhichIsA("ControllerManager", true)
         local root = getMovableRoot(character, humanoid)
 
-        -- A few experiences keep the camera on a second, custom-controlled model.
-        -- Only consider it if attached to our character, or if our regular character
-        -- has no moveable root and the camera's subject is a plausible local pawn.
         if (not root or root.Anchored) and Workspace.CurrentCamera then
             local subject = Workspace.CurrentCamera.CameraSubject
             local part = subject and (subject:IsA("BasePart") and subject
@@ -1620,7 +1556,7 @@ local function initializeAutoFight()
         end
         if movementDriver == "physics" and activeMoveRoot
             and activeMoveRoot.Parent and not activeMoveRoot.Anchored then
-            -- Remove only horizontal auto-steering velocity; preserve gravity.
+            
             pcall(function()
                 local velocity = activeMoveRoot.AssemblyLinearVelocity
                 activeMoveRoot.AssemblyLinearVelocity = Vector3.new(0, velocity.Y, 0)
@@ -1641,8 +1577,8 @@ local function initializeAutoFight()
 
     local function applyDirectMovement(dt)
         if not autoFightEnabled then return end
-        -- Snap instantly toward target; no CFrame:Lerp or smooth-look feature.
-        -- The camera-facing direction is also used to map movement into WASD.
+        
+        
         if autoLookAtTarget and autoLookPart and autoLookPart:IsDescendantOf(Workspace) then
             local camera = Workspace.CurrentCamera
             if camera then
@@ -1682,7 +1618,7 @@ local function initializeAutoFight()
                 end
             end
             if not applyKeyboardSteering(direction, steeringJump) then
-                -- If input synthesis is blocked by the game/executor, switch early.
+                
                 if navigationMode == "Auto" and not root.Anchored then
                     chooseMovementDriver("physics")
                 elseif os.clock() - lastBadRigDiagnostic > 5 then
@@ -1694,20 +1630,20 @@ local function initializeAutoFight()
             return
         end
         if movementDriver == "physics" then
-            -- Physics fallback moves the assembly horizontally, but keep Space
-            -- pressed for custom rigs whose jumping is driven by key input.
+            
+            
             for _, moveKey in ipairs({"W", "A", "S", "D"}) do
                 pressMoveKey(moveKey, false)
             end
             pressMoveKey("Space", steeringJump)
             if root.Anchored then
-                -- An anchored custom pawn can still accept actual keyboard input,
-                -- but physics velocity cannot move an anchored assembly.
+                
+                
                 if navigationMode == "Auto" then chooseMovementDriver("keyboard") end
                 return
             end
-            -- Velocity only; never teleport or set CFrame. This can work for
-            -- client-simulated custom models that do not use Roblox Humanoids.
+            
+            
             local walkSpeed = (humanoid and humanoid.WalkSpeed > 0)
                 and humanoid.WalkSpeed or 16
             local speed = math.clamp(walkSpeed, 9, 24)
@@ -1721,8 +1657,8 @@ local function initializeAutoFight()
             end
             return
         end
-        -- Native mode: try Roblox humanoid, player movement, and ControllerManager.
-        -- Do this AFTER standard controls without disabling the custom controls.
+        
+        
         if humanoid and humanoid.Parent then
             pcall(function() humanoid:Move(direction, false) end)
             if steeringJump then pcall(function() humanoid.Jump = true end) end
@@ -1769,8 +1705,6 @@ local function initializeAutoFight()
         return CFrame.fromAxisAngle(Vector3.yAxis, angle):VectorToWorldSpace(heading)
     end
 
-    -- Use ground *surface* height rather than root height: custom playermodels
-    -- have very different hip heights and part offsets.
     local function getSurfaceUnder(point, character, root)
         ledgeRayParams.FilterDescendantsInstances = {character}
         local up = math.max(5, root.Size.Y * 0.5 + 3)
@@ -1802,7 +1736,7 @@ local function initializeAutoFight()
                 return false
             end
         end
-        -- An additional shoulder-height ray catches fences/walls on taller rigs.
+        
         local shoulder = math.clamp(root.Size.Y * 0.4 + 1.5, 2, 4)
         return Workspace:Raycast(origin + Vector3.new(0, shoulder, 0),
             direction * distance, obstacleRayParams) == nil
@@ -1813,7 +1747,7 @@ local function initializeAutoFight()
             return false
         end
         if not autoAvoidHoles then return true end
-        -- Near and far look-ahead: won't stride into a gap between samples.
+        
         local near = math.min(2.6, lookAhead)
         local mid = math.max(near, lookAhead * 0.60)
         return groundSafe(root.Position + direction * near, character, root, floorY)
@@ -1821,8 +1755,6 @@ local function initializeAutoFight()
             and groundSafe(root.Position + direction * lookAhead, character, root, floorY)
     end
 
-    -- Probe an arbitrary waypoint instead of always casting from the current root.
-    -- This lets the planner consider a short route *around* an obstruction.
     local function routeSegmentSafe(character, targetCharacter, root, position, direction, distance)
         if direction.Magnitude < 0.1 or distance < 0.1 then return false end
         obstacleRayParams.FilterDescendantsInstances = targetCharacter
@@ -1847,9 +1779,6 @@ local function initializeAutoFight()
         return true
     end
 
-    -- Small bounded lookahead search (beam search), not Roblox PathfindingService.
-    -- Explores short collision/ledge-checked segments and keeps the 3 most useful
-    -- candidates per depth. Called only when blocked / repathing, not every frame.
     local ROUTE_ANGLES = {0, 32, -32, 62, -62, 90, -90, 125, -125, 180}
     local function calculateDetour(character, targetCharacter, root, goal)
         local start = root.Position
@@ -2004,8 +1933,8 @@ local function initializeAutoFight()
             return Vector3.zero, false
         end
         if phase == "jump" then
-            -- Hold Space for a little under a second even when the horizontal
-            -- way forward is blocked. Many custom controllers need a sustained key.
+            
+            
             if routeSegmentSafe(character, targetCharacter, root,
                 root.Position, toward, 2.3) then
                 return toward, true
@@ -2023,8 +1952,6 @@ local function initializeAutoFight()
         return Vector3.zero, false
     end
 
-    -- Step-up navigator: locate a walkable higher surface and press jump near its lip.
-    -- Probe distance is capped to prevent jumping across big gaps or into void.
     local climbLastProbeAt = 0
     local climbLastGoal = nil
     local climbCachedDirection = nil
@@ -2072,7 +1999,7 @@ local function initializeAutoFight()
                     and landing.Normal.Y >= 0.70 then
                     local rise = landing.Position.Y - baseY
                     if rise >= 1.25 and rise <= maxRise then
-                        -- Check overhead at the top of the jump, not at foot level.
+                        
                         local upperStart = Vector3.new(root.Position.X,
                             landing.Position.Y + math.max(1.4, root.Size.Y * 0.35), root.Position.Z)
                         local blockedAtTop = Workspace:Raycast(upperStart,
@@ -2103,10 +2030,7 @@ local function initializeAutoFight()
         if flat.Magnitude <= 0.15 then return Vector3.zero, false end
         local desired = flat.Unit
         local reference = getSurfaceUnder(root.Position, character, root)
-        -- On respawn / thin custom collision meshes, keep collision avoidance
-        -- working while ground sampling catches up.
-        -- A custom rig can float above its collider; unknown footing does not
-        -- automatically mean a hole. Fall back to short forward probes.
+
         if autoAvoidHoles and not reference then
             for _, offset in ipairs({0, 25, -25, 60, -60}) do
                 local candidate = rotateHeading(desired, math.rad(offset))
@@ -2133,7 +2057,7 @@ local function initializeAutoFight()
                 local side = degrees >= 0 and 1 or -1
                 local score = direction:Dot(desired) * 3 - math.abs(degrees) / 180
                 if steeringTargetSide == side and now < steerSideLockUntil then
-                    score += 1.6 -- Keep one wall-following side instead of jittering.
+                    score += 1.6 
                 end
                 if not bestScore or score > bestScore then
                     bestScore, best, bestSide = score, direction, side
@@ -2146,7 +2070,7 @@ local function initializeAutoFight()
             return best, false
         end
 
-        -- A low obstacle may be jumpable, but never jump when the landing is void.
+        
         if groundSafe(root.Position + desired * 3.5, character, root, floorY) then
             obstacleRayParams.FilterDescendantsInstances = {character, targetCharacter}
             local highOrigin = root.Position + Vector3.new(0, 3.5, 0)
@@ -2168,8 +2092,8 @@ local function initializeAutoFight()
             return false
         end
         if not getCharacterRoot(character) then return false end
-        -- Some custom pawns have no Humanoid at all. Allow navigation to their
-        -- replicated player character while avoiding explicitly dead Humanoids.
+        
+        
         local humanoid = getRigHumanoid(character)
         if not humanoid then return true end
         return humanoid:GetState() ~= Enum.HumanoidStateType.Dead
@@ -2208,8 +2132,6 @@ local function initializeAutoFight()
         resetAutoTarget()
     end
 
-    -- Water escape samples nearby dry terrain; the movement loop constantly
-    -- steers up and toward the best shore, using Jump to climb small banks.
     local swimShorePosition = nil
     local nextSwimSearchAt = 0
     local function findShore(root, character, targetPosition)
@@ -2270,7 +2192,7 @@ local function initializeAutoFight()
         if knownHumanoid ~= humanoid then
             releaseSprint()
             knownHumanoid = humanoid
-            -- New player model may contain a custom controller, not a Humanoid.
+            
             movementLastCheck = os.clock()
         end
         if root.Anchored and os.clock()-lastBadRigDiagnostic > 5 then
@@ -2327,8 +2249,8 @@ local function initializeAutoFight()
             bestGoalDistance = distance
             lastGoalProgressAt = now
         end
-        -- Ascending toward an elevated opponent counts as route progress even
-        -- when horizontal displacement is small.
+        
+        
         local remainingRise = math.max(0, targetPos.Y - root.Position.Y)
         if remainingRise < bestHeightGap - 0.8 then
             bestHeightGap = remainingRise
@@ -2350,12 +2272,12 @@ local function initializeAutoFight()
         swimShorePosition = nil
         nextSwimSearchAt = 0
 
-        -- Stop inside attack range, but keep chasing if blocked by a wall.
+        
         obstacleRayParams.FilterDescendantsInstances = {character, autoFightTarget.Character}
         local directSight = Workspace:Raycast(
             root.Position + Vector3.new(0, 1.2, 0),
             targetPos - root.Position, obstacleRayParams) == nil
-        -- Being horizontally close is not enough when the target is on a ledge.
+        
         local heightGap = targetPos.Y - root.Position.Y
         if distance <= autoApproachDistance and directSight and heightGap < 2.25 then
             setSteering(Vector3.zero, humanoid, controller, false)
@@ -2371,11 +2293,7 @@ local function initializeAutoFight()
         if distance > autoApproachDistance + 1 then
             approachGoal = targetPos - delta.Unit * math.max(2, autoApproachDistance - 2)
         end
-        -- A short saved detour prevents alternating left/right every frame.
-        -- If stuck, timed recovery takes priority: hold jump, try both sides,
-        -- back up, then recalculate a local waypoint route.
-        -- Prefer a short climb if the target is above us; only then use
-        -- recovery/waypoints. This allows moving up stairs or ledges in stages.
+
         local direction, jump = findClimbStep(character,
             autoFightTarget.Character, root, humanoid, targetPos, now)
         if direction then
@@ -2418,8 +2336,6 @@ local function initializeAutoFight()
                 "this custom rig has a nonstandard ground collider.")
         end
 
-        -- Detect a custom movement controller that ignores native Move calls.
-        -- Automatically try synthesized WASD, then client-side physics steering.
         if navigationMode == "Auto" and direction and direction.Magnitude > 0.15
             and distance > autoApproachDistance + 1 then
             if not movementLastPosition then
@@ -2452,8 +2368,6 @@ local function initializeAutoFight()
             movementLastCheck = now
         end
 
-        -- Detect stalled *progress* even when a character is sliding sideways
-        -- along a wall. Allow several seconds for useful detour movements.
         if now - lastGoalProgressAt > 5.0 and not recoveryPhase
             and distance > autoApproachDistance + 1 and autoStuckRecovery then
             lastRecoverySide *= -1
@@ -2462,9 +2376,6 @@ local function initializeAutoFight()
             lastGoalProgressAt = now
         end
 
-        -- Detect actual displacement rather than assuming a keypress worked.
-        -- Recovery has multiple timed phases and repeats with the other side
-        -- if needed; after repeated failures, briefly skip the unreachable target.
         if not autoProgressPosition then
             autoProgressPosition = root.Position
             autoProgressAt = now
@@ -2477,8 +2388,8 @@ local function initializeAutoFight()
             if travel >= 0.75 or climbed then
                 autoStuckCount = 0
                 lastRealMovement = now
-                -- Keep a good route until its waypoint is reached; stop the
-                -- emergency recovery moves once the player is truly moving.
+                
+                
                 recoveryPhase = nil
             elseif distance > autoApproachDistance + 1 then
                 autoStuckCount += 1
@@ -2524,12 +2435,7 @@ local function initializeAutoFight()
         end
     end
 
-    --============================================================
-    -- AUTO FIGHT [BETA] - single module, maximum features always on.
-    -- Keyboard input -> physics fallback, instant look, sprint, recovery,
-    -- water escape, jump-step climbing and ledge protection are automatic.
-    --============================================================
-    local AutoFightToggle = AutoFightTab:AddToggle("AutoFightToggle", {
+    local AutoFightToggle = MainTab:AddToggle("AutoFightToggle", {
         Title = "Auto Fight [BETA]",
         Description = "All features enabled: target pursuit, instant look, jump climbing, sprint, obstacle/ledge avoidance, recovery and repathing.",
         Default = false,
@@ -2568,7 +2474,7 @@ local function initializeAutoFight()
         end)
     end)
 
-    -- Do not strand an artificial Ctrl key press when the script's character dies.
+    
     player.CharacterRemoving:Connect(function()
         releaseSprint()
         releaseMoveKeys()
@@ -2581,212 +2487,5 @@ local function initializeAutoFight()
 end
 
 initializeAutoFight()
-
---============================================================
--- MISC: Single-toggle Auto Respawn
--- Fixed screen coordinate: 769, 722 (from the player's screen picker).
--- After a death, click until health recovers to 100 AND the rig relocates.
--- Then stop clicking until another death. No picker or extra controls.
--- Kept in a separate scope to avoid Luau's 200-local-register limit.
---============================================================
-local function initializeMisc()
-    local CLICK_POSITION = Vector2.new(769, 722)
-    local CLICK_INTERVAL = 0.70
-    local RECOVERED_HEALTH = 99.5
-    local TELEPORT_DISTANCE = 18
-    local TELEPORT_HORIZONTAL_DISTANCE = 12
-    local TELEPORT_INSTANT_DISTANCE = 14
-
-    local enabled = false
-    local phase = "idle" -- idle -> clicking -> complete -> (next death)
-    local deathCharacter = nil
-    local deathPosition = nil
-    local previousCharacter = nil
-    local previousPosition = nil
-    local previousSampleAt = 0
-    local lastAlivePosition = nil
-    local recoveredAt = nil
-    local nextClickAt = 0
-    local lastFailureNotice = -math.huge
-
-    -- This reads raw HP, including 0, since getHealthInfo intentionally
-    -- returns nil for dead characters. Custom replicated HP takes priority.
-    local function readLife()
-        local character = player.Character
-        local root = getCharacterRoot(character)
-        local position = root and root.Position or nil
-        if not character or not character:IsDescendantOf(Workspace) then
-            -- Once a live character has been seen, losing its model can
-            -- indicate a death/respawn transition on nonstandard rigs.
-            return nil, lastAlivePosition ~= nil, character, position
-        end
-
-        local hp
-        for _, source in ipairs(healthRoots(character, player)) do
-            hp = readNumber(source, CURRENT_HEALTH_FIELDS)
-            if hp ~= nil then break end
-        end
-        local humanoid = getRigHumanoid(character)
-        if hp == nil and humanoid then
-            hp = humanoid.Health
-        end
-
-        local dead = character:GetAttribute("Dead") == true
-            or character:GetAttribute("IsDead") == true
-            or (hp ~= nil and hp <= 0)
-            or (humanoid ~= nil and humanoid:GetState() == Enum.HumanoidStateType.Dead)
-        return hp, dead, character, position
-    end
-
-    -- Input simulation availability differs by Roblox environment. Release
-    -- the button on every attempt, even if the click process errors.
-    local function clickRespawn()
-        local x, y = CLICK_POSITION.X, CLICK_POSITION.Y
-        local vimOk, vim = pcall(function()
-            return game:GetService("VirtualInputManager")
-        end)
-        if vimOk and vim then
-            local pressed = false
-            local ok = pcall(function()
-                vim:SendMouseMoveEvent(x, y, game)
-                vim:SendMouseButtonEvent(x, y, 0, true, game, 0)
-                pressed = true
-                task.wait(0.05)
-            end)
-            if pressed then
-                pcall(function()
-                    vim:SendMouseButtonEvent(x, y, 0, false, game, 0)
-                end)
-            end
-            if ok then return true end
-        end
-        if type(mousemoveabs) == "function" then
-            local ok = pcall(function()
-                mousemoveabs(x, y)
-                if type(mouse1click) == "function" then
-                    mouse1click()
-                elseif type(mouse1press) == "function" and type(mouse1release) == "function" then
-                    mouse1press()
-                    task.wait(0.05)
-                    mouse1release()
-                else
-                    error("No supported mouse click function")
-                end
-            end)
-            if ok then return true end
-        end
-        return false
-    end
-
-    local function resetCycle()
-        phase = "idle"
-        deathCharacter = nil
-        deathPosition = nil
-        previousCharacter = nil
-        previousPosition = nil
-        previousSampleAt = 0
-        recoveredAt = nil
-        nextClickAt = 0
-    end
-
-    local toggle = MiscTab:AddToggle("MiscAutoRespawn", {
-        Title = "Auto Respawn",
-        Description = "Click X:769 Y:722 at 0 HP. Stop once HP returns to 100 and the character teleports; repeat each death.",
-        Default = false,
-    })
-    toggle:OnChanged(function(value)
-        enabled = value
-        resetCycle()
-        print(value
-            and "[Fluent Aura] Auto Respawn ON (click position: 769, 722)."
-            or "[Fluent Aura] Auto Respawn OFF.")
-    end)
-
-    task.spawn(function()
-        while true do
-            if enabled then
-                local now = os.clock()
-                local hp, dead, character, position = readLife()
-                local teleportedSuddenly = false
-
-                -- Track last live position so a removed corpse still has an
-                -- origin to compare against the later spawn/teleport position.
-                if phase == "idle" and not dead and hp and hp > 0 and position then
-                    lastAlivePosition = position
-                end
-
-                if phase == "idle" and dead then
-                    phase = "clicking"
-                    deathCharacter = character
-                    deathPosition = position or lastAlivePosition
-                    recoveredAt = nil
-                    nextClickAt = 0
-                    previousCharacter = character
-                    previousPosition = position
-                    previousSampleAt = now
-                    print("[Fluent Aura] Auto Respawn: 0 HP detected; clicking PLAY at 769, 722.")
-                elseif phase == "complete" and dead then
-                    -- Re-arm for the next actual death, not repeated spamming
-                    -- during the same life or after the spawn completed.
-                    phase = "clicking"
-                    deathCharacter = character
-                    deathPosition = position or lastAlivePosition
-                    recoveredAt = nil
-                    nextClickAt = 0
-                    previousCharacter = character
-                    previousPosition = position
-                    previousSampleAt = now
-                    print("[Fluent Aura] Auto Respawn: new death detected.")
-                end
-
-                if phase == "clicking" then
-                    if position and previousPosition and character == previousCharacter
-                        and now - previousSampleAt < 0.7 then
-                        teleportedSuddenly = (position - previousPosition).Magnitude
-                            >= TELEPORT_INSTANT_DISTANCE
-                    end
-                    if position then
-                        previousCharacter = character
-                        previousPosition = position
-                        previousSampleAt = now
-                    end
-
-                    if not recoveredAt and hp and hp >= RECOVERED_HEALTH and not dead then
-                        recoveredAt = now
-                        print("[Fluent Aura] Auto Respawn: health back to 100; waiting for teleport.")
-                    end
-
-                    -- Do not declare a completed respawn solely because HP
-                    -- changed; verify substantial relocation as requested.
-                    if recoveredAt and position then
-                        local displacement = deathPosition and (position - deathPosition)
-                        local changedCharacter = deathCharacter and character ~= deathCharacter
-                        local relocated = teleportedSuddenly
-                        if displacement then
-                            relocated = relocated or (displacement.Magnitude >= TELEPORT_DISTANCE
-                                and (changedCharacter or Vector3.new(displacement.X, 0, displacement.Z).Magnitude
-                                    >= TELEPORT_HORIZONTAL_DISTANCE))
-                        end
-                        if relocated then
-                            phase = "complete"
-                            print("[Fluent Aura] Auto Respawn: health restored and teleport detected; stopped clicking.")
-                        end
-                    end
-
-                    if phase == "clicking" and now >= nextClickAt then
-                        nextClickAt = now + CLICK_INTERVAL
-                        if not clickRespawn() and now - lastFailureNotice >= 8 then
-                            lastFailureNotice = now
-                            warn("[Fluent Aura] Auto Respawn: simulated mouse input unavailable; check executor support.")
-                        end
-                    end
-                end
-            end
-            task.wait(0.15)
-        end
-    end)
-end
-
-initializeMisc()
 
 Window:SelectTab(1)
