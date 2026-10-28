@@ -150,9 +150,9 @@ end
 
 local Window = Fluent:CreateWindow({
 
-    Title = "Flee The Facility Script",
+    Title = "Afright Scripts",
 
-    SubTitle = "Discord: antho.nyx",
+    SubTitle = "1.0.0",
 
     TabWidth = 155,
 

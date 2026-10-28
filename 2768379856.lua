@@ -29,8 +29,8 @@ end
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local Window = Fluent:CreateWindow({
-    Title = "3008 Mod Menu",
-    SubTitle = "Movement Update | Fluent UI",
+    Title = "Afright Scripts",
+    SubTitle = "1.0.0",
     TabWidth = 150,
     Size = UDim2.fromOffset(575, 450),
     Acrylic = false,
